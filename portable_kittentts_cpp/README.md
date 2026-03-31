@@ -125,10 +125,11 @@ Examples:
 The GitHub release workflow publishes two kinds of artifacts on `v*` tags:
 
 - `portable_kittentts_cpp-<tag>-dist.zip` - the normal portable `dist/` folder packed as a zip
-- `portable_kittentts_cpp-<tag>-nano.exe`, `portable_kittentts_cpp-<tag>-nano-int8.exe`, `portable_kittentts_cpp-<tag>-micro.exe`, `portable_kittentts_cpp-<tag>-mini.exe` - single-file self-extracting bundles that include one model each
+- `portable_kittentts_cpp-<tag>-nano.exe`, `portable_kittentts_cpp-<tag>-nano-int8.exe`, `portable_kittentts_cpp-<tag>-micro.exe`, `portable_kittentts_cpp-<tag>-mini.exe` - single-file bootstrapper bundles that unpack a model-specific payload to temp and then launch the normal CLI
 
-The single-EXE releases unpack to a temp folder, expand the bundled payload, and then launch `kitten_tts.exe --model <variant>`.
-They are meant as one-click interactive launchers; use the `dist.zip` release if you want the full CLI surface with custom flags.
+The single-EXE releases are CLI-compatible: double-clicking opens the interactive prompt, and command-line switches such as `--text`, `--speaker`, `--speed`, `--output`, `--list-speakers`, and the rest of the portable flags are forwarded to the embedded app.
+The only model-related difference is that each bundle is fixed to its baked-in model, so the wrapper injects the matching `--model` value for you.
+Use the `dist.zip` release if you want all bundled models in one portable folder, or use a single-EXE bundle if you want one model pinned to a double-clickable file.
 Push a tag like `v0.1.0` and the GitHub Actions workflow will publish these artifacts automatically.
 You can also trigger the same workflow manually from the GitHub Actions tab and enter the release tag there.
 
@@ -144,4 +145,4 @@ When present, `build.ps1` copies both files into `dist/` so release artifacts in
 2. Pick a version tag such as `v0.1.0`.
 3. Push the tag to GitHub with `git push origin v0.1.0`, or open GitHub Actions and run the `Release` workflow manually with the same tag.
 4. Wait for the Actions run to finish.
-5. Download the `dist` zip or the single-EXE model bundles from the GitHub release page.
+5. Download either the `dist` zip for the full portable folder, or one of the single-EXE model bundles if you want a one-file launcher.

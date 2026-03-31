@@ -69,6 +69,18 @@ namespace
         return executable_dir();
     }
 
+    std::filesystem::path resolve_output_root(const std::filesystem::path& app_root)
+    {
+        if (const char* env = std::getenv("KITTEN_TTS_OUTPUT_ROOT"))
+        {
+            if (*env)
+            {
+                return std::filesystem::path(env);
+            }
+        }
+        return app_root;
+    }
+
     CliOptions parse_args(int argc, char** argv)
     {
         CliOptions opts;
@@ -190,9 +202,10 @@ int main(int argc, char** argv)
         }
 
         const auto app_root = resolve_app_root();
+        const auto output_root = resolve_output_root(app_root);
         if (opts.output.is_relative())
         {
-            opts.output = app_root / opts.output;
+            opts.output = output_root / opts.output;
         }
         auto engine = kit::KittenTtsEngine::load(app_root, opts.model);
 

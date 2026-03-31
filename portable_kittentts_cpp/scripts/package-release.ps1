@@ -25,6 +25,9 @@ else {
 
 $artifactRoot = Join-Path $outputRoot "artifacts"
 $workRoot = Join-Path $outputRoot "work"
+$payloadRoot = Join-Path $workRoot "payload"
+$bootstrapperBuildRoot = Join-Path $workRoot "bootstrapper"
+$payloadZip = Join-Path $workRoot "payload.zip"
 
 function Ensure-Directory {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -47,6 +50,30 @@ function Get-DistItems {
     return @(Get-ChildItem -Force -LiteralPath $distRoot | ForEach-Object { $_.FullName })
 }
 
+function Get-ZigPath {
+    $zig = Get-Command zig -ErrorAction SilentlyContinue
+    if ($zig) {
+        return $zig.Source
+    }
+
+    $localZig = Join-Path $repoRoot "tools\zig\zig.exe"
+    if (Test-Path $localZig) {
+        return $localZig
+    }
+
+    throw "Zig not found. Install Zig 0.15+ or place zig.exe in tools\zig\zig.exe."
+}
+
+function Get-ModelFolderName {
+    switch ($Model) {
+        "nano" { return "kitten-nano-v0_8-onnx" }
+        "nano-int8" { return "kitten-nano-int8-v0_8-onnx" }
+        "micro" { return "kitten-micro-v0_8-onnx" }
+        "mini" { return "kitten-mini-v0_8-onnx" }
+        default { throw "Unsupported model: $Model" }
+    }
+}
+
 function New-DistZip {
     Ensure-Directory $artifactRoot
 
@@ -65,91 +92,95 @@ function New-DistZip {
     Write-Host "Wrote $artifactPath"
 }
 
-function New-SfxPackage {
+function Build-Bootstrapper {
+    Ensure-Directory $bootstrapperBuildRoot
+
+    $zigPath = Get-ZigPath
+    $bootstrapperSource = Join-Path $repoRoot "src\bootstrapper.cpp"
+    $bootstrapperExe = Join-Path $bootstrapperBuildRoot "bootstrapper.exe"
+
+    & $zigPath c++ -std=c++20 -Oz $bootstrapperSource -o $bootstrapperExe -lshell32 -Xlinker /subsystem:console
+    if ($LASTEXITCODE -ne 0) {
+        throw "Bootstrapper build failed."
+    }
+
+    return $bootstrapperExe
+}
+
+function Copy-PayloadFiles {
+    param(
+        [Parameter(Mandatory = $true)][string]$ModelFolderName
+    )
+
+    Reset-Directory $payloadRoot
+
+    Copy-Item -Force (Join-Path $distRoot "kitten_tts.exe") (Join-Path $payloadRoot "kitten_tts.exe")
+    Copy-Item -Force (Join-Path $distRoot "data") (Join-Path $payloadRoot "data") -Recurse
+    Copy-Item -Force (Join-Path $distRoot "runtime") (Join-Path $payloadRoot "runtime") -Recurse
+
+    $payloadModelRoot = Join-Path $payloadRoot "model"
+    Ensure-Directory $payloadModelRoot
+    Copy-Item -Force (Join-Path $distRoot "model\$ModelFolderName") (Join-Path $payloadModelRoot $ModelFolderName) -Recurse
+
+    if (Test-Path (Join-Path $distRoot "LICENSE")) {
+        Copy-Item -Force (Join-Path $distRoot "LICENSE") (Join-Path $payloadRoot "LICENSE")
+    }
+    if (Test-Path (Join-Path $distRoot "THIRD_PARTY_NOTICES.md")) {
+        Copy-Item -Force (Join-Path $distRoot "THIRD_PARTY_NOTICES.md") (Join-Path $payloadRoot "THIRD_PARTY_NOTICES.md")
+    }
+}
+
+function Append-Payload {
+    param(
+        [Parameter(Mandatory = $true)][string]$ArtifactPath,
+        [Parameter(Mandatory = $true)][string]$PayloadZipPath,
+        [Parameter(Mandatory = $true)][string]$ModelKey
+    )
+
+    $magic = [Text.Encoding]::ASCII.GetBytes("KTTSZIP1")
+    if ($magic.Length -ne 8) {
+        throw "Unexpected footer magic length."
+    }
+
+    $modelBytes = [Text.Encoding]::ASCII.GetBytes($ModelKey)
+    if ($modelBytes.Length -gt 16) {
+        throw "Model key is too long for the footer."
+    }
+
+    $footer = New-Object byte[] 32
+    [Array]::Copy($magic, 0, $footer, 0, 8)
+    [Array]::Copy([BitConverter]::GetBytes([UInt64](Get-Item $PayloadZipPath).Length), 0, $footer, 8, 8)
+    [Array]::Copy($modelBytes, 0, $footer, 16, $modelBytes.Length)
+
+    $payloadStream = [System.IO.File]::OpenRead($PayloadZipPath)
+    $artifactStream = [System.IO.File]::Open($ArtifactPath, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
+    try {
+        $buffer = New-Object byte[] (1024 * 1024)
+        while (($read = $payloadStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $artifactStream.Write($buffer, 0, $read)
+        }
+        $artifactStream.Write($footer, 0, $footer.Length)
+    }
+    finally {
+        $payloadStream.Dispose()
+        $artifactStream.Dispose()
+    }
+}
+
+function New-SingleExePackage {
     Ensure-Directory $artifactRoot
     Reset-Directory $workRoot
 
     $artifactName = "portable_kittentts_cpp-$Tag-$Model.exe"
     $artifactPath = Join-Path $artifactRoot $artifactName
-    $payloadPath = Join-Path $workRoot "payload.zip"
-    $launchPath = Join-Path $workRoot "launch.cmd"
-    $sedPath = Join-Path $workRoot "package.sed"
+    $bootstrapperExe = Build-Bootstrapper
+    $modelFolderName = Get-ModelFolderName
 
-    $distItems = Get-DistItems
-    if (-not $distItems) {
-        throw "dist folder is empty or missing: $distRoot"
-    }
+    Copy-PayloadFiles -ModelFolderName $modelFolderName
+    Compress-Archive -Path (Join-Path $payloadRoot "*") -DestinationPath $payloadZip -CompressionLevel Optimal
 
-    Compress-Archive -Path $distItems -DestinationPath $payloadPath -CompressionLevel Optimal
-
-    @"
-@echo off
-setlocal
-cd /d "%~dp0"
-set "KITTEN_TTS_ROOT=%~dp0"
-title Kitten TTS $Model
-if not exist "kitten_tts.exe" (
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Expand-Archive -LiteralPath '%~dp0payload.zip' -DestinationPath '%~dp0' -Force"
-  if errorlevel 1 exit /b %errorlevel%
-)
-if not exist "kitten_tts.exe" (
-  echo Failed to extract kitten_tts.exe.
-  exit /b 1
-)
-kitten_tts.exe --model $Model
-set "EXIT_CODE=%errorlevel%"
-if not "%EXIT_CODE%"=="0" (
-  echo.
-  echo Kitten TTS exited with error code %EXIT_CODE%.
-  pause
-)
-exit /b %EXIT_CODE%
-"@ | Set-Content -Encoding Ascii -NoNewline $launchPath
-
-    @"
-[Version]
-Class=IEXPRESS
-SEDVersion=3
-[Options]
-PackagePurpose=InstallApp
-ShowInstallProgramWindow=1
-HideExtractAnimation=1
-UseLongFileName=1
-InsideCompressed=0
-CAB_FixedSize=0
-CAB_ResvCodeSigning=0
-RebootMode=N
-InstallPrompt=
-DisplayLicense=
-FinishMessage=
-TargetName=$artifactPath
-FriendlyName=portable_kittentts_cpp $Tag $Model
-AppLaunched=C:\Windows\System32\cmd.exe /d /s /k launch.cmd
-PostInstallCmd=<None>
-AdminQuietInstCmd=
-UserQuietInstCmd=
-SourceFiles=SourceFiles
-Compress=0
-[Strings]
-FILE0=payload.zip
-FILE1=launch.cmd
-[SourceFiles]
-SourceFiles0=$workRoot
-[SourceFiles0]
-%FILE0%=
-%FILE1%=
-"@ | Set-Content -Encoding Ascii -NoNewline $sedPath
-
-    $iexpress = Get-Command iexpress.exe -ErrorAction SilentlyContinue
-    $iexpressPath = if ($iexpress) { $iexpress.Source } else { Join-Path $env:WINDIR "System32\iexpress.exe" }
-    if (-not (Test-Path $iexpressPath)) {
-        throw "iexpress.exe was not found. It is required to create the single-EXE release artifacts."
-    }
-
-    $process = Start-Process -FilePath $iexpressPath -ArgumentList @("/N", $sedPath) -Wait -PassThru
-    if ($process.ExitCode -ne 0) {
-        throw "iexpress packaging failed with exit code $($process.ExitCode)"
-    }
+    Copy-Item -Force $bootstrapperExe $artifactPath
+    Append-Payload -ArtifactPath $artifactPath -PayloadZipPath $payloadZip -ModelKey $Model
 
     if (-not (Test-Path $artifactPath)) {
         throw "Expected release artifact was not created: $artifactPath"
@@ -166,5 +197,5 @@ Reset-Directory $artifactRoot
 
 switch ($Kind) {
     "dist" { New-DistZip }
-    "sfx" { New-SfxPackage }
+    "sfx" { New-SingleExePackage }
 }
