@@ -113,10 +113,29 @@ Examples:
 ## Notes
 
 - CPU inference only in this build.
-- ONNX Runtime is loaded from `runtime\onnxruntime\onnxruntime.dll` at runtime, so the EXE stays small and does not statically depend on the DLL.
-- The portable bundle is pinned to the KittenML Nano 0.8 reference runtime line (`onnxruntime` 1.22.1) so the local output stays closer to the official demo.
+- The portable bundle loads ONNX Runtime from `runtime\onnxruntime\onnxruntime.dll` at runtime, which keeps the EXE portable and the release workflow lightweight.
 - `--device` is accepted for compatibility, but this build is CPU-only.
 - `--model` selects between the bundled `nano`, `nano-int8`, `micro`, and `mini` models.
 - The CLI applies per-voice speed priors when the selected model defines them, so the bundled voices match the reference behavior more closely.
 - Raw demo-style phonemization is used by default, matching the Hugging Face Space behavior. Pass `--clean-text` if you want number / currency expansion before phonemizing.
 - Output is written to `infer_outputs\output.wav` under the app root by default and played immediately.
+
+## Releases
+
+The GitHub release workflow publishes two kinds of artifacts on `v*` tags:
+
+- `portable_kittentts_cpp-<tag>-dist.zip` - the normal portable `dist/` folder packed as a zip
+- `portable_kittentts_cpp-<tag>-nano.exe`, `portable_kittentts_cpp-<tag>-nano-int8.exe`, `portable_kittentts_cpp-<tag>-micro.exe`, `portable_kittentts_cpp-<tag>-mini.exe` - single-file self-extracting bundles that include one model each
+
+The single-EXE releases unpack to a temp folder, expand the bundled payload, and then launch `kitten_tts.exe --model <variant>`.
+They are meant as one-click interactive launchers; use the `dist.zip` release if you want the full CLI surface with custom flags.
+Push a tag like `v0.1.0` and the GitHub Actions workflow will publish these artifacts automatically.
+You can also trigger the same workflow manually from the GitHub Actions tab and enter the release tag there.
+
+## Release Checklist
+
+1. Make sure `dist\` builds locally with `.\build.ps1`.
+2. Pick a version tag such as `v0.1.0`.
+3. Push the tag to GitHub with `git push origin v0.1.0`, or open GitHub Actions and run the `Release` workflow manually with the same tag.
+4. Wait for the Actions run to finish.
+5. Download the `dist` zip or the single-EXE model bundles from the GitHub release page.

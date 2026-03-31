@@ -2,9 +2,9 @@
 
 build/
 dist/
+release/
 runtime/
 model/
 tools/zig/
 third_party/onnxruntime/include/
 third_party/onnxruntime/lib/
-
