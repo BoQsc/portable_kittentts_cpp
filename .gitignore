@@ -1,0 +1,51 @@
+# Keep the GitHub repo source-only. All bulky artifacts are recreated by the
+# bootstrap/build scripts or are just local workspace scratch.
+
+# Portable Kitten TTS project outputs and downloaded assets
+portable_kittentts_cpp/build/
+portable_kittentts_cpp/dist/
+portable_kittentts_cpp/runtime/
+portable_kittentts_cpp/model/
+portable_kittentts_cpp/tools/zig/
+portable_kittentts_cpp/third_party/onnxruntime/include/
+portable_kittentts_cpp/third_party/onnxruntime/lib/
+
+# Local binaries and object files at the workspace root
+*.exe
+*.obj
+*.dll
+*.lib
+*.d
+*.zip
+*.mp4
+*.jpg
+*.jpeg
+*.png
+*.log
+*.pyc
+__pycache__/
+
+# Scratch folders from experiments
+_hf_kitten_webgpu/
+_kitten_small_check/
+_onnxruntime1221_extract/
+_ort_backup/
+_ort_include_backup_124/
+objcheck/
+pypadpp_recent_*/
+portable_kittentts_windows_small/
+portable_sherpa_tts_windows/
+portable_sherpa_tts_windows_cli/
+portable_kittentts_native/
+_micro_config.json
+_micro_kitten_tts_micro_v0_8.onnx
+_micro_voices.npz
+_official_voices.npz
+_onnxruntime-win-x64-1.22.1.zip
+desktop_notes.txt
+desktop_shell_state.txt
+native_nle_recent.txt
+native_nle_window.json
+plus_proxy.py
+pypadpp.py
+realm-of-shadows.html

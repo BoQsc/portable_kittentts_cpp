@@ -1,0 +1,10 @@
+# Source-only project ignore list for the portable Kitten TTS folder.
+
+build/
+dist/
+runtime/
+model/
+tools/zig/
+third_party/onnxruntime/include/
+third_party/onnxruntime/lib/
+
