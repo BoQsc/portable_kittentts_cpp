@@ -23,27 +23,28 @@ env:
 jobs:
   dist:
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: portable_kittentts_cpp
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Prepare assets
-        shell: pwsh
         run: .\scripts\prepare-release-assets.ps1 -Models all -ZigVersion $env:ZIG_VERSION -OnnxRuntimeVersion $env:ONNX_RUNTIME_VERSION -EspeakNgVersion $env:ESPEAK_NG_VERSION
 
       - name: Build dist
-        shell: pwsh
         run: .\build.ps1
 
       - name: Package dist
-        shell: pwsh
         run: .\scripts\package-release.ps1 -Kind dist -Tag $env:RELEASE_TAG -OutputDir release
 
       - name: Upload dist artifact
         uses: actions/upload-artifact@v4
         with:
           name: release-dist
-          path: release\artifacts\*
+          path: portable_kittentts_cpp\release\artifacts\*
 
   single-exe:
     runs-on: windows-latest
@@ -55,27 +56,28 @@ jobs:
           - nano-int8
           - micro
           - mini
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: portable_kittentts_cpp
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Prepare assets
-        shell: pwsh
         run: .\scripts\prepare-release-assets.ps1 -Models ${{ matrix.model }} -ZigVersion $env:ZIG_VERSION -OnnxRuntimeVersion $env:ONNX_RUNTIME_VERSION -EspeakNgVersion $env:ESPEAK_NG_VERSION
 
       - name: Build dist
-        shell: pwsh
         run: .\build.ps1
 
       - name: Package single-exe
-        shell: pwsh
         run: .\scripts\package-release.ps1 -Kind sfx -Model ${{ matrix.model }} -Tag $env:RELEASE_TAG -OutputDir release
 
       - name: Upload single-exe artifact
         uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.model }}
-          path: release\artifacts\*
+          path: portable_kittentts_cpp\release\artifacts\*
 
   publish:
     needs:
