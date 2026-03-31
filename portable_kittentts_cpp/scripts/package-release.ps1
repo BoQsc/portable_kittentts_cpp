@@ -86,12 +86,24 @@ function New-SfxPackage {
 @echo off
 setlocal
 cd /d "%~dp0"
+set "KITTEN_TTS_ROOT=%~dp0"
+title Kitten TTS $Model
 if not exist "kitten_tts.exe" (
   powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Expand-Archive -LiteralPath '%~dp0payload.zip' -DestinationPath '%~dp0' -Force"
   if errorlevel 1 exit /b %errorlevel%
 )
+if not exist "kitten_tts.exe" (
+  echo Failed to extract kitten_tts.exe.
+  exit /b 1
+)
 kitten_tts.exe --model $Model
-exit /b %errorlevel%
+set "EXIT_CODE=%errorlevel%"
+if not "%EXIT_CODE%"=="0" (
+  echo.
+  echo Kitten TTS exited with error code %EXIT_CODE%.
+  pause
+)
+exit /b %EXIT_CODE%
 "@ | Set-Content -Encoding Ascii -NoNewline $launchPath
 
     @"
@@ -100,7 +112,7 @@ Class=IEXPRESS
 SEDVersion=3
 [Options]
 PackagePurpose=InstallApp
-ShowInstallProgramWindow=0
+ShowInstallProgramWindow=1
 HideExtractAnimation=1
 UseLongFileName=1
 InsideCompressed=0
@@ -112,7 +124,7 @@ DisplayLicense=
 FinishMessage=
 TargetName=$artifactPath
 FriendlyName=portable_kittentts_cpp $Tag $Model
-AppLaunched=C:\Windows\System32\cmd.exe /d /s /c launch.cmd
+AppLaunched=C:\Windows\System32\cmd.exe /d /s /k launch.cmd
 PostInstallCmd=<None>
 AdminQuietInstCmd=
 UserQuietInstCmd=
