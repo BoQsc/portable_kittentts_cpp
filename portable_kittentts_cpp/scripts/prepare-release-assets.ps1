@@ -3,7 +3,7 @@ param(
     [string[]]$Models = @("all"),
     [string]$ZigVersion = "0.15.2",
     [string]$OnnxRuntimeVersion = "1.24.4",
-    [string]$EspeakNgVersion = "1.52"
+    [string]$EspeakNgVersion = "1.52.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -80,7 +80,7 @@ function Install-Zig {
     Reset-Directory $zigRoot
 
     $zigArchive = Join-Path $env:TEMP ("zig-" + $ZigVersion + ".zip")
-    $zigUrl = "https://ziglang.org/download/$ZigVersion/zig-windows-x86_64-$ZigVersion.zip"
+    $zigUrl = "https://ziglang.org/download/$ZigVersion/zig-x86_64-windows-$ZigVersion.zip"
     Invoke-Download -Uri $zigUrl -OutFile $zigArchive
 
     $zigExtract = Join-Path $env:TEMP ("zig-" + $ZigVersion + "-" + [guid]::NewGuid().ToString("N"))
@@ -109,7 +109,7 @@ function Install-OnnxRuntime {
     Reset-Directory $ortRuntimeRoot
 
     $ortPackage = Join-Path $env:TEMP ("microsoft.ml.onnxruntime-" + $OnnxRuntimeVersion + ".nupkg")
-    $ortUrl = "https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime/$OnnxRuntimeVersion"
+    $ortUrl = "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/$OnnxRuntimeVersion/microsoft.ml.onnxruntime.$OnnxRuntimeVersion.nupkg"
     Invoke-Download -Uri $ortUrl -OutFile $ortPackage
 
     $ortExtract = Join-Path $env:TEMP ("ort-" + $OnnxRuntimeVersion + "-" + [guid]::NewGuid().ToString("N"))
@@ -130,10 +130,11 @@ function Install-EspeakNg {
     $espeakRoot = Join-Path $repoRoot "runtime\espeak-lite"
     Reset-Directory $espeakRoot
 
-    $msiPath = Join-Path $env:TEMP ("espeak-ng-" + $EspeakNgVersion + "-X64.msi")
+    $msiPath = Join-Path $env:TEMP ("espeak-ng-" + $EspeakNgVersion + ".msi")
     $msiUrls = @(
-        "https://github.com/espeak-ng/espeak-ng/releases/download/$EspeakNgVersion/espeak-ng-x64.msi",
-        "https://github.com/espeak-ng/espeak-ng/releases/download/$EspeakNgVersion/espeak-ng-X64.msi"
+        "https://github.com/espeak-ng/espeak-ng/releases/download/$EspeakNgVersion/espeak-ng.msi",
+        "https://github.com/espeak-ng/espeak-ng/releases/download/$EspeakNgVersion/espeak-ng-X64.msi",
+        "https://github.com/espeak-ng/espeak-ng/releases/download/$EspeakNgVersion/espeak-ng-x64.msi"
     )
     $downloaded = $false
     foreach ($msiUrl in $msiUrls) {

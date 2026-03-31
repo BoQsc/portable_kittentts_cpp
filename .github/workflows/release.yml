@@ -17,11 +17,25 @@ permissions:
 env:
   ZIG_VERSION: "0.15.2"
   ONNX_RUNTIME_VERSION: "1.24.4"
-  ESPEAK_NG_VERSION: "1.52"
+  ESPEAK_NG_VERSION: "1.52.0"
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
 
 jobs:
+  preflight:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: portable_kittentts_cpp
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate release sources
+        run: .\scripts\validate-release-sources.ps1 -ZigVersion $env:ZIG_VERSION -OnnxRuntimeVersion $env:ONNX_RUNTIME_VERSION -EspeakNgVersion $env:ESPEAK_NG_VERSION
+
   dist:
+    needs: preflight
     runs-on: windows-latest
     defaults:
       run:
@@ -47,6 +61,7 @@ jobs:
           path: portable_kittentts_cpp\release\artifacts\*
 
   single-exe:
+    needs: preflight
     runs-on: windows-latest
     strategy:
       fail-fast: false
