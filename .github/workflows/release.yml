@@ -29,7 +29,7 @@ jobs:
         working-directory: portable_kittentts_cpp
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Prepare assets
         run: .\scripts\prepare-release-assets.ps1 -Models all -ZigVersion $env:ZIG_VERSION -OnnxRuntimeVersion $env:ONNX_RUNTIME_VERSION -EspeakNgVersion $env:ESPEAK_NG_VERSION
@@ -41,7 +41,7 @@ jobs:
         run: .\scripts\package-release.ps1 -Kind dist -Tag $env:RELEASE_TAG -OutputDir release
 
       - name: Upload dist artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: release-dist
           path: portable_kittentts_cpp\release\artifacts\*
@@ -62,7 +62,7 @@ jobs:
         working-directory: portable_kittentts_cpp
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Prepare assets
         run: .\scripts\prepare-release-assets.ps1 -Models ${{ matrix.model }} -ZigVersion $env:ZIG_VERSION -OnnxRuntimeVersion $env:ONNX_RUNTIME_VERSION -EspeakNgVersion $env:ESPEAK_NG_VERSION
@@ -74,7 +74,7 @@ jobs:
         run: .\scripts\package-release.ps1 -Kind sfx -Model ${{ matrix.model }} -Tag $env:RELEASE_TAG -OutputDir release
 
       - name: Upload single-exe artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: release-${{ matrix.model }}
           path: portable_kittentts_cpp\release\artifacts\*
@@ -86,7 +86,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-assets
           merge-multiple: true

@@ -241,7 +241,7 @@ else {
 }
 
 foreach ($model in $selectedModels) {
-    if (-not $modelSpecs.ContainsKey($model)) {
+    if (-not ($modelSpecs.Keys -contains $model)) {
         throw "Unknown model variant: $model"
     }
 }
