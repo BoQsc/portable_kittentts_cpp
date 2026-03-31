@@ -132,6 +132,12 @@ They are meant as one-click interactive launchers; use the `dist.zip` release if
 Push a tag like `v0.1.0` and the GitHub Actions workflow will publish these artifacts automatically.
 You can also trigger the same workflow manually from the GitHub Actions tab and enter the release tag there.
 
+## License And Notices
+
+See the repo root `LICENSE` file for the project license.
+The repo root [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) lists the bundled runtime dependencies and model licenses.
+When present, `build.ps1` copies both files into `dist/` so release artifacts include the notices.
+
 ## Release Checklist
 
 1. Make sure `dist\` builds locally with `.\build.ps1`.

@@ -87,11 +87,12 @@ function Install-Zig {
     Ensure-Directory $zigExtract
     Expand-Archive -LiteralPath $zigArchive -DestinationPath $zigExtract -Force
 
-    $zigSourceRoot = Join-Path $zigExtract ("zig-windows-x86_64-$ZigVersion")
-    if (-not (Test-Path (Join-Path $zigSourceRoot "zig.exe"))) {
-        throw "Zig archive did not contain the expected folder: $zigSourceRoot"
+    $zigExeItem = Get-ChildItem -Path $zigExtract -Recurse -Filter "zig.exe" | Select-Object -First 1
+    if (-not $zigExeItem) {
+        throw "Zig archive did not contain zig.exe: $zigExtract"
     }
 
+    $zigSourceRoot = $zigExeItem.Directory.FullName
     Copy-Item -Path (Join-Path $zigSourceRoot "*") -Destination $zigRoot -Recurse -Force
 
     Remove-Item $zigArchive -Force

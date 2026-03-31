@@ -1,6 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $root = $PSScriptRoot
+$repoRoot = Split-Path $root -Parent
 $dist = Join-Path $root "dist"
 $src = Join-Path $root "src"
 $ortInclude = Join-Path $root "third_party\onnxruntime\include"
@@ -44,6 +45,12 @@ Copy-Item -Force (Join-Path $root "data") (Join-Path $dist "data") -Recurse
 Copy-Item -Force (Join-Path $root "model") (Join-Path $dist "model") -Recurse
 Copy-Item -Force (Join-Path $root "runtime") (Join-Path $dist "runtime") -Recurse
 Copy-Item -Force (Join-Path $root "README.md") (Join-Path $dist "README.md")
+if (Test-Path (Join-Path $repoRoot "LICENSE")) {
+    Copy-Item -Force (Join-Path $repoRoot "LICENSE") (Join-Path $dist "LICENSE")
+}
+if (Test-Path (Join-Path $repoRoot "THIRD_PARTY_NOTICES.md")) {
+    Copy-Item -Force (Join-Path $repoRoot "THIRD_PARTY_NOTICES.md") (Join-Path $dist "THIRD_PARTY_NOTICES.md")
+}
 Copy-Item -Force (Join-Path $root "run.bat") (Join-Path $dist "run.bat")
 Copy-Item -Force (Join-Path $root "run.ps1") (Join-Path $dist "run.ps1")
 Copy-Item -Force (Join-Path $root "nano.bat") (Join-Path $dist "nano.bat")
