@@ -2,8 +2,10 @@
 
 #include <filesystem>
 #include <cstdlib>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -67,4 +69,19 @@ namespace kit
         throw std::runtime_error("No supported WAV player command was available.");
 #endif
     }
+
+#ifdef _WIN32
+    inline void play_wav_bytes(const std::vector<std::uint8_t>& wav_bytes)
+    {
+        if (wav_bytes.empty())
+        {
+            throw std::runtime_error("Cannot play an empty WAV buffer.");
+        }
+
+        if (!PlaySoundW(reinterpret_cast<LPCWSTR>(wav_bytes.data()), nullptr, SND_MEMORY | SND_SYNC | SND_NODEFAULT))
+        {
+            throw std::runtime_error("Failed to play WAV from memory.");
+        }
+    }
+#endif
 }

@@ -39,6 +39,8 @@ namespace
         std::string speaker = "male";
         std::string text;
         std::filesystem::path output = "infer_outputs/output.wav";
+        bool output_set = false;
+        bool noplayback = false;
         float speed = 1.0f;
         std::string device = "cpu";
         bool clean_text = false;
@@ -57,6 +59,8 @@ namespace
         std::filesystem::path output;
         bool clean_text_set = false;
         bool clean_text = false;
+        bool noplayback_set = false;
+        bool noplayback = false;
         bool text_set = false;
         std::string text;
     };
@@ -261,6 +265,8 @@ namespace
             first_lower == "output" ||
             first_lower == "clean-text" ||
             first_lower == "clean_text" ||
+            first_lower == "noplayback" ||
+            first_lower == "playback" ||
             first_lower == "text" ||
             first_lower == "say" ||
             starts_with_ascii(first_lower, "speaker=") ||
@@ -268,6 +274,8 @@ namespace
             starts_with_ascii(first_lower, "output=") ||
             starts_with_ascii(first_lower, "clean-text=") ||
             starts_with_ascii(first_lower, "clean_text=") ||
+            starts_with_ascii(first_lower, "noplayback=") ||
+            starts_with_ascii(first_lower, "playback=") ||
             starts_with_ascii(first_lower, "text=") ||
             starts_with_ascii(first_lower, "say=");
 
@@ -310,6 +318,31 @@ namespace
                 {
                     ++i;
                 }
+                ++i;
+                continue;
+            }
+
+            if (lower == "--noplayback" || lower == "noplayback" || starts_with_ascii(lower, "--noplayback=") || starts_with_ascii(lower, "noplayback=") ||
+                lower == "--playback" || lower == "playback" || starts_with_ascii(lower, "--playback=") || starts_with_ascii(lower, "playback="))
+            {
+                if (lower == "--noplayback" || lower == "noplayback")
+                {
+                    cmd.noplayback_set = true;
+                    cmd.noplayback = true;
+                    ++i;
+                    continue;
+                }
+                if (lower == "--playback" || lower == "playback")
+                {
+                    cmd.noplayback_set = true;
+                    cmd.noplayback = false;
+                    ++i;
+                    continue;
+                }
+
+                const bool playback_value = parse_bool_token(token.substr(token.find('=') + 1));
+                cmd.noplayback_set = true;
+                cmd.noplayback = !playback_value;
                 ++i;
                 continue;
             }
@@ -600,6 +633,7 @@ namespace
             else if (arg == "--output")
             {
                 opts.output = next_value("--output");
+                opts.output_set = true;
             }
             else if (arg == "--model")
             {
@@ -612,6 +646,14 @@ namespace
             else if (arg == "--clean-text")
             {
                 opts.clean_text = true;
+            }
+            else if (arg == "--noplayback")
+            {
+                opts.noplayback = true;
+            }
+            else if (arg == "--playback")
+            {
+                opts.noplayback = false;
             }
             else if (arg == "--named-session-server")
             {
@@ -641,15 +683,83 @@ namespace
     {
         std::ostringstream response;
         const auto result = engine.synthesize(opts.text, opts.speaker, opts.speed, opts.clean_text);
-        if (!opts.output.parent_path().empty())
+        const bool wants_output = opts.output_set;
+        const bool wants_playback = !opts.noplayback;
+        std::vector<std::uint8_t> wav_bytes;
+        if (wants_output || wants_playback)
         {
-            std::filesystem::create_directories(opts.output.parent_path());
+            wav_bytes = kit::build_wav_pcm16_bytes(result.samples, result.sample_rate);
         }
-        kit::write_wav_pcm16(opts.output.string(), result.samples, result.sample_rate);
-        response << "Saved " << opts.output.string() << "\n";
+
+        if (wants_output)
+        {
+            if (!opts.output.parent_path().empty())
+            {
+                std::filesystem::create_directories(opts.output.parent_path());
+            }
+            kit::write_wav_pcm16(opts.output.string(), result.samples, result.sample_rate);
+        }
+
+#ifdef _WIN32
+        if (wants_output)
+        {
+            response << "Saved " << opts.output.string() << "\n";
+        }
+        else if (wants_playback)
+        {
+            response << "Played in-memory output\n";
+        }
+        else
+        {
+            response << "Synthesized without playback\n";
+        }
         response << "Model " << engine.model_name() << ", voice " << result.voice_display_name << "\n";
         out << response.str();
-        kit::play_wav_file(opts.output);
+        if (wants_playback)
+        {
+            kit::play_wav_bytes(wav_bytes);
+        }
+#else
+        std::filesystem::path playback_path;
+        bool temporary_output = wants_playback && !wants_output;
+        if (temporary_output)
+        {
+            const auto tick = static_cast<unsigned long long>(std::chrono::steady_clock::now().time_since_epoch().count());
+            std::ostringstream name;
+            name << "kitten-tts-output-" << tick << ".wav";
+            playback_path = std::filesystem::temp_directory_path() / "portable_kittentts_cpp" / name.str();
+            std::filesystem::create_directories(playback_path.parent_path());
+            kit::write_wav_pcm16(playback_path.string(), result.samples, result.sample_rate);
+        }
+        else
+        {
+            playback_path = opts.output;
+        }
+
+        if (wants_output)
+        {
+            response << "Saved " << playback_path.string() << "\n";
+        }
+        else if (wants_playback)
+        {
+            response << "Played temporary output from " << playback_path.string() << "\n";
+        }
+        else
+        {
+            response << "Synthesized without playback\n";
+        }
+        response << "Model " << engine.model_name() << ", voice " << result.voice_display_name << "\n";
+        out << response.str();
+        if (wants_playback)
+        {
+            kit::play_wav_file(playback_path);
+            if (temporary_output)
+            {
+                std::error_code cleanup_error;
+                std::filesystem::remove(playback_path, cleanup_error);
+            }
+        }
+#endif
         return response.str();
     }
 
@@ -744,6 +854,7 @@ namespace
             if (request.output_set)
             {
                 session_defaults.output = request.output;
+                session_defaults.output_set = true;
             }
             if (request.clean_text_set)
             {
@@ -1014,10 +1125,15 @@ namespace
         if (request.output_set)
         {
             session_defaults.output = request.output;
+            session_defaults.output_set = true;
         }
         if (request.clean_text_set)
         {
             session_defaults.clean_text = request.clean_text;
+        }
+        if (request.noplayback_set)
+        {
+            session_defaults.noplayback = request.noplayback;
         }
 
         if (request.text_set)
@@ -1027,7 +1143,7 @@ namespace
             run_opts.output = resolve_output_path(output_root, run_opts.output);
             synthesize_once(engine, run_opts, response);
         }
-        else if (request.speaker_set || request.speed_set || request.output_set || request.clean_text_set)
+        else if (request.speaker_set || request.speed_set || request.output_set || request.clean_text_set || request.noplayback_set)
         {
             response << "Session defaults updated.\n";
         }

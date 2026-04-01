@@ -76,6 +76,7 @@ Aliases:
 - `--session` keeps one model loaded and accepts multiple commands from stdin.
 - Single-EXE bundles cache their extracted payload after the first launch.
 - `--coldstart` forces a fresh temporary extraction for the single-EXE bundles.
+- The default one-shot path plays audio from memory; pass `--noplayback` to skip audio, or `--output` to keep a WAV file.
 - The root repo stays source-only; generated assets and release outputs are excluded from Git.
 
 ## License

@@ -71,6 +71,7 @@ exit
 ```
 
 In session mode, each line can set defaults or speak immediately. Common fields are `speaker=...`, `speed=...`, `output=...`, `clean-text=...`, and `text=...`.
+Use `noplayback=true` or `playback=false` on a line if you want synthesis without audio output.
 
 For named reusable sessions, use `--session NAME` from your scripts:
 
@@ -143,7 +144,7 @@ Examples:
 - `--model` selects between the bundled `nano`, `nano-int8`, `micro`, and `mini` models.
 - The CLI applies per-voice speed priors when the selected model defines them, so the bundled voices match the reference behavior more closely.
 - Raw demo-style phonemization is used by default, matching the Hugging Face Space behavior. Pass `--clean-text` if you want number / currency expansion before phonemizing.
-- Output is written to `infer_outputs\output.wav` under the app root by default and played immediately.
+- Output is played from memory by default. Pass `--noplayback` to skip audio playback entirely, or `--output` if you want to keep a WAV file.
 
 ## Releases
 

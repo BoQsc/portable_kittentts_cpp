@@ -20,6 +20,7 @@ inline void print_cli_help(std::ostream& os, bool include_bootstrapper_options =
         << "  --send                 Send one command to a named session and exit\n"
         << "  --terminate            Stop a named session and exit\n"
         << "  --clean-text           Enable number / currency expansion before phonemizing\n"
+        << "  --noplayback           Synthesize without playing audio\n"
         << "  --output FILE.wav      WAV output path\n"
         << "  --list-speakers        Print the voice list\n";
 
