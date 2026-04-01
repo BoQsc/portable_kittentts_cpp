@@ -37,6 +37,7 @@ portable_kittentts_windows_small/
 portable_sherpa_tts_windows/
 portable_sherpa_tts_windows_cli/
 portable_kittentts_native/
+release-*/
 _micro_config.json
 _micro_kitten_tts_micro_v0_8.onnx
 _micro_voices.npz

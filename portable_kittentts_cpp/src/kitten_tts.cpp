@@ -687,18 +687,25 @@ namespace kit
 
     void KittenTtsEngine::print_speakers() const
     {
-        std::cout << _model_name << " voices:\n";
+        std::cout << speakers_text();
+    }
+
+    std::string KittenTtsEngine::speakers_text() const
+    {
+        std::ostringstream out;
+        out << _model_name << " voices:\n";
         for (std::size_t i = 0; i < _speakers.size(); ++i)
         {
             const auto& s = _speakers[i];
-            std::cout << i << ": " << s.alias << " (" << s.voice_id << ")";
+            out << i << ": " << s.alias << " (" << s.voice_id << ")";
             if (std::fabs(s.speed_prior - 1.0f) > 0.0001f)
             {
-                std::cout << " speed-prior=" << s.speed_prior;
+                out << " speed-prior=" << s.speed_prior;
             }
-            std::cout << "\n";
+            out << "\n";
         }
-        std::cout << "Aliases: male -> Jasper, female -> Bella\n";
+        out << "Aliases: male -> Jasper, female -> Bella\n";
+        return out.str();
     }
 
     SpeakerChoice KittenTtsEngine::resolve_speaker(const std::string& speaker) const

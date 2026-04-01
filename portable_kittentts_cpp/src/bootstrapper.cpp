@@ -1,6 +1,8 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include "cli_help.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -15,7 +17,7 @@
 
 namespace
 {
-    constexpr std::array<unsigned char, 8> kFooterMagic = {'K', 'T', 'T', 'S', 'Z', 'I', 'P', '1'};
+    constexpr std::array<unsigned char, 8> kFooterMagic = {'K', 'T', 'T', 'S', 'R', 'A', 'W', '1'};
     constexpr std::size_t kFooterSize = 32;
     constexpr std::size_t kModelFieldSize = 16;
 
@@ -23,6 +25,14 @@ namespace
     {
         std::uint64_t payload_size = 0;
         std::wstring model_key;
+    };
+
+    struct CacheContext
+    {
+        std::filesystem::path root;
+        std::filesystem::path app_root;
+        std::filesystem::path marker;
+        bool ready = false;
     };
 
     std::filesystem::path executable_path()
@@ -34,6 +44,26 @@ namespace
             throw std::runtime_error("Failed to resolve the bootstrapper path.");
         }
         return std::filesystem::path(buffer);
+    }
+
+    std::uint32_t read_u32_le(const unsigned char* bytes)
+    {
+        std::uint32_t value = 0;
+        for (int i = 3; i >= 0; --i)
+        {
+            value = (value << 8) | bytes[i];
+        }
+        return value;
+    }
+
+    std::uint64_t read_u64_le(const unsigned char* bytes)
+    {
+        std::uint64_t value = 0;
+        for (int i = 7; i >= 0; --i)
+        {
+            value = (value << 8) | bytes[i];
+        }
+        return value;
     }
 
     std::wstring to_lower(std::wstring value)
@@ -60,16 +90,6 @@ namespace
             return L"micro";
         }
         return L"nano";
-    }
-
-    std::uint64_t read_u64_le(const unsigned char* bytes)
-    {
-        std::uint64_t value = 0;
-        for (int i = 7; i >= 0; --i)
-        {
-            value = (value << 8) | bytes[i];
-        }
-        return value;
     }
 
     PackageFooter read_footer(const std::filesystem::path& self_path)
@@ -136,6 +156,30 @@ namespace
 
         LocalFree(argv);
         return args;
+    }
+
+    bool help_requested(const std::vector<std::wstring>& args)
+    {
+        for (const auto& arg : args)
+        {
+            if (arg == L"--help" || arg == L"-h" || arg == L"/?")
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool coldstart_requested(const std::vector<std::wstring>& args)
+    {
+        for (const auto& arg : args)
+        {
+            if (arg == L"--coldstart" || arg == L"--cold-start")
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     std::wstring quote_arg(const std::wstring& arg)
@@ -213,6 +257,11 @@ namespace
                 continue;
             }
 
+            if (arg == L"--coldstart" || arg == L"--cold-start")
+            {
+                continue;
+            }
+
             filtered.push_back(arg);
         }
 
@@ -230,49 +279,134 @@ namespace
         return command;
     }
 
-    std::filesystem::path make_workspace()
+    std::filesystem::path local_appdata_root()
     {
-        wchar_t temp_buffer[MAX_PATH];
-        const DWORD temp_len = GetTempPathW(static_cast<DWORD>(std::size(temp_buffer)), temp_buffer);
-        if (temp_len == 0 || temp_len >= std::size(temp_buffer))
+        wchar_t buffer[32768];
+        const DWORD len = GetEnvironmentVariableW(L"LOCALAPPDATA", buffer, static_cast<DWORD>(std::size(buffer)));
+        if (len != 0 && len < std::size(buffer))
         {
-            throw std::runtime_error("Failed to resolve the temporary directory.");
+            return std::filesystem::path(buffer);
         }
-
-        const std::wstring workspace_name = L"portable_kittentts_cpp-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64());
-        std::filesystem::path workspace = std::filesystem::path(temp_buffer) / workspace_name;
-        std::filesystem::create_directories(workspace / L"app");
-        return workspace;
+        return std::filesystem::temp_directory_path();
     }
 
-    std::filesystem::path powershell_exe()
+    std::wstring sanitize_component(std::wstring value)
     {
-        wchar_t system_root[MAX_PATH];
-        const DWORD len = GetEnvironmentVariableW(L"SystemRoot", system_root, static_cast<DWORD>(std::size(system_root)));
-        if (len != 0 && len < std::size(system_root))
+        for (wchar_t& ch : value)
         {
-            return std::filesystem::path(system_root) / L"System32" / L"WindowsPowerShell" / L"v1.0" / L"powershell.exe";
+            switch (ch)
+            {
+            case L'<':
+            case L'>':
+            case L':':
+            case L'"':
+            case L'/':
+            case L'\\':
+            case L'|':
+            case L'?':
+            case L'*':
+                ch = L'_';
+                break;
+            default:
+                break;
+            }
         }
-        return L"powershell.exe";
+        return value;
     }
 
-    void copy_range_to_file(const std::filesystem::path& source, std::uint64_t offset, std::uint64_t length, const std::filesystem::path& destination)
+    CacheContext cache_context_for(const std::filesystem::path& self, const PackageFooter& footer)
     {
-        std::ifstream input(source, std::ios::binary);
-        if (!input)
+        const std::uintmax_t image_size = std::filesystem::file_size(self);
+        const std::wstring stem = sanitize_component(self.stem().wstring());
+        const std::wstring model = sanitize_component(footer.model_key.empty() ? L"nano" : footer.model_key);
+        const std::filesystem::path cache_root = local_appdata_root() / L"portable_kittentts_cpp" / L"single-exe" /
+            (stem + L"-" + model + L"-" + std::to_wstring(image_size) + L"-" + std::to_wstring(footer.payload_size));
+
+        CacheContext ctx;
+        ctx.root = cache_root;
+        ctx.app_root = cache_root / L"app";
+        ctx.marker = cache_root / L".ready";
+        ctx.ready = std::filesystem::exists(ctx.marker) && std::filesystem::exists(ctx.app_root / L"kitten_tts.exe");
+        return ctx;
+    }
+
+    std::filesystem::path coldstart_workspace_root(const std::filesystem::path& self, const PackageFooter& footer)
+    {
+        const std::wstring stem = sanitize_component(self.stem().wstring());
+        const std::wstring model = sanitize_component(footer.model_key.empty() ? L"nano" : footer.model_key);
+        const std::filesystem::path base = local_appdata_root() / L"portable_kittentts_cpp" / L"single-exe" / L"coldstart";
+
+        std::error_code base_error;
+        std::filesystem::create_directories(base, base_error);
+
+        const unsigned long long pid = static_cast<unsigned long long>(GetCurrentProcessId());
+        const unsigned long long tick = static_cast<unsigned long long>(GetTickCount64());
+        for (unsigned int attempt = 0; attempt < 64; ++attempt)
         {
-            throw std::runtime_error("Failed to open the bootstrapper image.");
+            const std::filesystem::path candidate = base / (stem + L"-" + model + L"-" + std::to_wstring(pid) + L"-" +
+                std::to_wstring(tick) + L"-" + std::to_wstring(attempt));
+            std::error_code candidate_error;
+            if (std::filesystem::create_directories(candidate, candidate_error) || std::filesystem::exists(candidate))
+            {
+                return candidate;
+            }
         }
 
-        input.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
-        std::ofstream output(destination, std::ios::binary);
-        if (!output)
+        throw std::runtime_error("Failed to create a coldstart extraction workspace.");
+    }
+
+    void mark_cache_ready(const CacheContext& cache)
+    {
+        std::ofstream marker(cache.marker, std::ios::binary);
+        if (!marker)
         {
-            throw std::runtime_error("Failed to create the temporary payload archive.");
+            throw std::runtime_error("Failed to write the cache marker.");
+        }
+        marker << "ready";
+    }
+
+    std::wstring utf8_to_wide(const std::string& value)
+    {
+        const int wide_length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0);
+        if (wide_length <= 0)
+        {
+            throw std::runtime_error("Invalid UTF-8 path in embedded payload.");
         }
 
+        std::wstring wide(static_cast<std::size_t>(wide_length), L'\0');
+        if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), wide.data(), wide_length) <= 0)
+        {
+            throw std::runtime_error("Failed to convert embedded path from UTF-8.");
+        }
+        return wide;
+    }
+
+    bool contains_parent_segment(const std::filesystem::path& path)
+    {
+        for (const auto& part : path)
+        {
+            if (part == L"..")
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    std::filesystem::path safe_relative_path(const std::string& utf8_path)
+    {
+        const std::filesystem::path relative = std::filesystem::path(utf8_to_wide(utf8_path));
+        if (relative.empty() || relative.is_absolute() || relative.has_root_name() || relative.has_root_directory() || contains_parent_segment(relative))
+        {
+            throw std::runtime_error("Embedded payload contained an invalid path.");
+        }
+        return relative;
+    }
+
+    void copy_stream(std::ifstream& input, std::ofstream& output, std::uint64_t bytes_to_copy)
+    {
         std::array<char, 1 << 16> buffer{};
-        std::uint64_t remaining = length;
+        std::uint64_t remaining = bytes_to_copy;
         while (remaining != 0)
         {
             const std::size_t chunk = static_cast<std::size_t>(std::min<std::uint64_t>(remaining, buffer.size()));
@@ -280,7 +414,7 @@ namespace
             const std::streamsize read = input.gcount();
             if (read <= 0)
             {
-                throw std::runtime_error("Failed to extract the embedded payload.");
+                throw std::runtime_error("Unexpected end of embedded payload.");
             }
 
             output.write(buffer.data(), read);
@@ -288,52 +422,69 @@ namespace
         }
     }
 
-    void expand_archive(const std::filesystem::path& archive, const std::filesystem::path& destination)
+    void extract_raw_bundle(const std::filesystem::path& source, std::uint64_t payload_offset, std::uint64_t payload_size, const std::filesystem::path& destination)
     {
-        const std::wstring command = L"Expand-Archive -LiteralPath " + quote_arg(archive.wstring()) + L" -DestinationPath " + quote_arg(destination.wstring()) + L" -Force";
-        std::wstring ps_args = L"-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -Command " + quote_arg(command);
-        std::wstring ps_command = ps_args;
-
-        STARTUPINFOW si{};
-        si.cb = sizeof(si);
-        si.dwFlags = STARTF_USESHOWWINDOW;
-        si.wShowWindow = SW_HIDE;
-
-        PROCESS_INFORMATION pi{};
-        std::filesystem::path ps_path = powershell_exe();
-        BOOL created = CreateProcessW(
-            ps_path.c_str(),
-            ps_command.data(),
-            nullptr,
-            nullptr,
-            FALSE,
-            CREATE_NO_WINDOW,
-            nullptr,
-            nullptr,
-            &si,
-            &pi);
-
-        if (!created)
+        std::ifstream input(source, std::ios::binary);
+        if (!input)
         {
-            throw std::runtime_error("Failed to launch PowerShell for payload extraction.");
+            throw std::runtime_error("Failed to open the bootstrapper image.");
         }
 
-        WaitForSingleObject(pi.hProcess, INFINITE);
-
-        DWORD exit_code = 0;
-        if (!GetExitCodeProcess(pi.hProcess, &exit_code))
+        input.seekg(static_cast<std::streamoff>(payload_offset), std::ios::beg);
+        if (!input)
         {
-            CloseHandle(pi.hThread);
-            CloseHandle(pi.hProcess);
-            throw std::runtime_error("Failed to query the PowerShell exit code.");
+            throw std::runtime_error("Failed to seek to the embedded payload.");
         }
 
-        CloseHandle(pi.hThread);
-        CloseHandle(pi.hProcess);
-
-        if (exit_code != 0)
+        std::uint64_t remaining = payload_size;
+        while (remaining != 0)
         {
-            throw std::runtime_error(std::string("Payload extraction failed with exit code ") + std::to_string(exit_code));
+            if (remaining < 12)
+            {
+                throw std::runtime_error("Embedded payload is truncated.");
+            }
+
+            std::array<unsigned char, 12> header{};
+            input.read(reinterpret_cast<char*>(header.data()), static_cast<std::streamsize>(header.size()));
+            if (!input)
+            {
+                throw std::runtime_error("Failed to read the embedded payload header.");
+            }
+            remaining -= static_cast<std::uint64_t>(header.size());
+
+            const std::uint32_t path_length = read_u32_le(header.data());
+            const std::uint64_t file_size = read_u64_le(header.data() + 4);
+            if (remaining < static_cast<std::uint64_t>(path_length) + file_size)
+            {
+                throw std::runtime_error("Embedded payload is truncated.");
+            }
+
+            std::string path_bytes(static_cast<std::size_t>(path_length), '\0');
+            if (path_length != 0)
+            {
+                input.read(path_bytes.data(), static_cast<std::streamsize>(path_bytes.size()));
+                if (!input)
+                {
+                    throw std::runtime_error("Failed to read the embedded payload path.");
+                }
+            }
+            remaining -= static_cast<std::uint64_t>(path_length);
+
+            const std::filesystem::path relative_path = safe_relative_path(path_bytes);
+            const std::filesystem::path out_path = destination / relative_path;
+            if (!out_path.parent_path().empty())
+            {
+                std::filesystem::create_directories(out_path.parent_path());
+            }
+
+            std::ofstream output(out_path, std::ios::binary);
+            if (!output)
+            {
+                throw std::runtime_error("Failed to create an extracted payload file.");
+            }
+
+            copy_stream(input, output, file_size);
+            remaining -= file_size;
         }
     }
 
@@ -345,18 +496,41 @@ namespace
         }
         return fallback_model_from_name(self_path);
     }
+
+    struct TempWorkspaceCleanup
+    {
+        std::filesystem::path root;
+        bool active = false;
+
+        ~TempWorkspaceCleanup()
+        {
+            if (!active || root.empty())
+            {
+                return;
+            }
+
+            std::error_code cleanup_error;
+            std::filesystem::remove_all(root, cleanup_error);
+        }
+    };
 }
 
 int main()
 {
-    std::filesystem::path workspace;
-
     try
     {
         const auto self = executable_path();
+        const std::vector<std::wstring> original_args = command_line_arguments();
+        const bool coldstart = coldstart_requested(original_args);
+
+        if (help_requested(original_args))
+        {
+            print_cli_help(std::cout, true);
+            return 0;
+        }
+
         const auto footer = read_footer(self);
         const std::wstring model_key = resolve_model_key(footer, self);
-        const std::vector<std::wstring> original_args = command_line_arguments();
         const std::vector<std::wstring> child_args = build_child_args(original_args, model_key);
 
         const std::uintmax_t image_size = std::filesystem::file_size(self);
@@ -365,26 +539,47 @@ int main()
             throw std::runtime_error("The embedded payload size is invalid.");
         }
 
-        workspace = make_workspace();
-        const std::filesystem::path archive_path = workspace / L"payload.zip";
-        const std::filesystem::path extracted_root = workspace / L"app";
-
         const std::uint64_t payload_offset = static_cast<std::uint64_t>(image_size - static_cast<std::uintmax_t>(kFooterSize) - footer.payload_size);
-        copy_range_to_file(self, payload_offset, footer.payload_size, archive_path);
-        expand_archive(archive_path, extracted_root);
+        const CacheContext cache = cache_context_for(self, footer);
+        const bool use_cache = !coldstart;
+        std::filesystem::path extraction_root;
+        std::filesystem::path app_root;
+        TempWorkspaceCleanup temp_workspace;
 
-        const std::filesystem::path child_exe = extracted_root / L"kitten_tts.exe";
+        if (use_cache)
+        {
+            app_root = cache.app_root;
+            if (!cache.ready)
+            {
+                std::error_code cleanup_error;
+                std::filesystem::remove_all(cache.root, cleanup_error);
+                std::filesystem::create_directories(cache.app_root);
+                extract_raw_bundle(self, payload_offset, footer.payload_size, cache.app_root);
+                mark_cache_ready(cache);
+            }
+        }
+        else
+        {
+            extraction_root = coldstart_workspace_root(self, footer);
+            app_root = extraction_root / L"app";
+            std::filesystem::create_directories(app_root);
+            temp_workspace.root = extraction_root;
+            temp_workspace.active = true;
+            extract_raw_bundle(self, payload_offset, footer.payload_size, app_root);
+        }
+
+        const std::filesystem::path child_exe = app_root / L"kitten_tts.exe";
         if (!std::filesystem::exists(child_exe))
         {
             throw std::runtime_error("The embedded portable app is missing kitten_tts.exe.");
         }
 
-        if (!SetEnvironmentVariableW(L"KITTEN_TTS_ROOT", extracted_root.c_str()))
+        const std::wstring output_root = self.parent_path().wstring();
+        if (!SetEnvironmentVariableW(L"KITTEN_TTS_ROOT", app_root.c_str()))
         {
             throw std::runtime_error("Failed to set KITTEN_TTS_ROOT.");
         }
 
-        const std::wstring output_root = self.parent_path().wstring();
         if (!SetEnvironmentVariableW(L"KITTEN_TTS_OUTPUT_ROOT", output_root.c_str()))
         {
             throw std::runtime_error("Failed to set KITTEN_TTS_OUTPUT_ROOT.");
@@ -404,7 +599,7 @@ int main()
             FALSE,
             0,
             nullptr,
-            extracted_root.c_str(),
+            app_root.c_str(),
             &si,
             &pi);
 
@@ -425,19 +620,11 @@ int main()
 
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
-
-        std::error_code cleanup_error;
-        std::filesystem::remove_all(workspace, cleanup_error);
         return static_cast<int>(exit_code);
     }
     catch (const std::exception& e)
     {
         std::cerr << "Error: " << e.what() << "\n";
-        if (!workspace.empty())
-        {
-            std::error_code cleanup_error;
-            std::filesystem::remove_all(workspace, cleanup_error);
-        }
         return 1;
     }
 }

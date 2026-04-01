@@ -27,7 +27,6 @@ $artifactRoot = Join-Path $outputRoot "artifacts"
 $workRoot = Join-Path $outputRoot "work"
 $payloadRoot = Join-Path $workRoot "payload"
 $bootstrapperBuildRoot = Join-Path $workRoot "bootstrapper"
-$payloadZip = Join-Path $workRoot "payload.zip"
 
 function Ensure-Directory {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -74,6 +73,36 @@ function Get-ModelFolderName {
     }
 }
 
+function Get-RelativeBundlePath {
+    param(
+        [Parameter(Mandatory = $true)][string]$BasePath,
+        [Parameter(Mandatory = $true)][string]$FullPath
+    )
+
+    $relative = $FullPath.Substring($BasePath.Length).TrimStart('\')
+    return ($relative -replace '\\', '/')
+}
+
+function Write-UInt32LE {
+    param(
+        [Parameter(Mandatory = $true)][System.IO.Stream]$Stream,
+        [Parameter(Mandatory = $true)][UInt32]$Value
+    )
+
+    $bytes = [BitConverter]::GetBytes($Value)
+    $Stream.Write($bytes, 0, $bytes.Length)
+}
+
+function Write-UInt64LE {
+    param(
+        [Parameter(Mandatory = $true)][System.IO.Stream]$Stream,
+        [Parameter(Mandatory = $true)][UInt64]$Value
+    )
+
+    $bytes = [BitConverter]::GetBytes($Value)
+    $Stream.Write($bytes, 0, $bytes.Length)
+}
+
 function New-DistZip {
     Ensure-Directory $artifactRoot
 
@@ -98,13 +127,25 @@ function Build-Bootstrapper {
     $zigPath = Get-ZigPath
     $bootstrapperSource = Join-Path $repoRoot "src\bootstrapper.cpp"
     $bootstrapperExe = Join-Path $bootstrapperBuildRoot "bootstrapper.exe"
+    $srcInclude = Join-Path $repoRoot "src"
 
-    & $zigPath c++ -std=c++20 -Oz $bootstrapperSource -o $bootstrapperExe -lshell32 -Xlinker /subsystem:console
+    & $zigPath c++ -std=c++20 -Oz -I $srcInclude $bootstrapperSource -o $bootstrapperExe -lshell32 -Xlinker /subsystem:console
     if ($LASTEXITCODE -ne 0) {
         throw "Bootstrapper build failed."
     }
 
     return $bootstrapperExe
+}
+
+function Copy-FileIfExists {
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Destination
+    )
+
+    if (Test-Path $Source) {
+        Copy-Item -Force $Source $Destination
+    }
 }
 
 function Copy-PayloadFiles {
@@ -122,47 +163,70 @@ function Copy-PayloadFiles {
     Ensure-Directory $payloadModelRoot
     Copy-Item -Force (Join-Path $distRoot "model\$ModelFolderName") (Join-Path $payloadModelRoot $ModelFolderName) -Recurse
 
-    if (Test-Path (Join-Path $distRoot "LICENSE")) {
-        Copy-Item -Force (Join-Path $distRoot "LICENSE") (Join-Path $payloadRoot "LICENSE")
-    }
-    if (Test-Path (Join-Path $distRoot "THIRD_PARTY_NOTICES.md")) {
-        Copy-Item -Force (Join-Path $distRoot "THIRD_PARTY_NOTICES.md") (Join-Path $payloadRoot "THIRD_PARTY_NOTICES.md")
-    }
+    Copy-FileIfExists -Source (Join-Path $distRoot "README.md") -Destination (Join-Path $payloadRoot "README.md")
+    Copy-FileIfExists -Source (Join-Path $distRoot "run.bat") -Destination (Join-Path $payloadRoot "run.bat")
+    Copy-FileIfExists -Source (Join-Path $distRoot "run.ps1") -Destination (Join-Path $payloadRoot "run.ps1")
+    Copy-FileIfExists -Source (Join-Path $distRoot "nano.bat") -Destination (Join-Path $payloadRoot "nano.bat")
+    Copy-FileIfExists -Source (Join-Path $distRoot "nano-int8.bat") -Destination (Join-Path $payloadRoot "nano-int8.bat")
+    Copy-FileIfExists -Source (Join-Path $distRoot "micro.bat") -Destination (Join-Path $payloadRoot "micro.bat")
+    Copy-FileIfExists -Source (Join-Path $distRoot "mini.bat") -Destination (Join-Path $payloadRoot "mini.bat")
+    Copy-FileIfExists -Source (Join-Path $distRoot "LICENSE") -Destination (Join-Path $payloadRoot "LICENSE")
+    Copy-FileIfExists -Source (Join-Path $distRoot "THIRD_PARTY_NOTICES.md") -Destination (Join-Path $payloadRoot "THIRD_PARTY_NOTICES.md")
 }
 
-function Append-Payload {
+function Append-RawBundle {
     param(
         [Parameter(Mandatory = $true)][string]$ArtifactPath,
-        [Parameter(Mandatory = $true)][string]$PayloadZipPath,
         [Parameter(Mandatory = $true)][string]$ModelKey
     )
 
-    $magic = [Text.Encoding]::ASCII.GetBytes("KTTSZIP1")
-    if ($magic.Length -ne 8) {
-        throw "Unexpected footer magic length."
+    $files = @(Get-ChildItem -LiteralPath $payloadRoot -Recurse -File | Sort-Object FullName)
+    if (-not $files) {
+        throw "Payload folder is empty: $payloadRoot"
     }
 
-    $modelBytes = [Text.Encoding]::ASCII.GetBytes($ModelKey)
-    if ($modelBytes.Length -gt 16) {
-        throw "Model key is too long for the footer."
-    }
-
-    $footer = New-Object byte[] 32
-    [Array]::Copy($magic, 0, $footer, 0, 8)
-    [Array]::Copy([BitConverter]::GetBytes([UInt64](Get-Item $PayloadZipPath).Length), 0, $footer, 8, 8)
-    [Array]::Copy($modelBytes, 0, $footer, 16, $modelBytes.Length)
-
-    $payloadStream = [System.IO.File]::OpenRead($PayloadZipPath)
     $artifactStream = [System.IO.File]::Open($ArtifactPath, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
     try {
+        [UInt64]$payloadSize = 0
         $buffer = New-Object byte[] (1024 * 1024)
-        while (($read = $payloadStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
-            $artifactStream.Write($buffer, 0, $read)
+
+        foreach ($file in $files) {
+            $relativePath = Get-RelativeBundlePath -BasePath $payloadRoot -FullPath $file.FullName
+            $pathBytes = [Text.Encoding]::UTF8.GetBytes($relativePath)
+            if ($pathBytes.Length -gt [UInt32]::MaxValue) {
+                throw "Embedded path is too long: $relativePath"
+            }
+
+            Write-UInt32LE -Stream $artifactStream -Value ([UInt32]$pathBytes.Length)
+            Write-UInt64LE -Stream $artifactStream -Value ([UInt64]$file.Length)
+            $artifactStream.Write($pathBytes, 0, $pathBytes.Length)
+
+            $inputStream = [System.IO.File]::Open($file.FullName, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+            try {
+                while (($read = $inputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                    $artifactStream.Write($buffer, 0, $read)
+                }
+            }
+            finally {
+                $inputStream.Dispose()
+            }
+
+            $payloadSize += [UInt64](12 + $pathBytes.Length) + [UInt64]$file.Length
         }
+
+        $footer = New-Object byte[] 32
+        $magic = [Text.Encoding]::ASCII.GetBytes("KTTSRAW1")
+        [Array]::Copy($magic, 0, $footer, 0, 8)
+        [Array]::Copy([BitConverter]::GetBytes([UInt64]$payloadSize), 0, $footer, 8, 8)
+
+        $modelBytes = [Text.Encoding]::ASCII.GetBytes($ModelKey)
+        if ($modelBytes.Length -gt 16) {
+            throw "Model key is too long for the footer."
+        }
+        [Array]::Copy($modelBytes, 0, $footer, 16, $modelBytes.Length)
         $artifactStream.Write($footer, 0, $footer.Length)
     }
     finally {
-        $payloadStream.Dispose()
         $artifactStream.Dispose()
     }
 }
@@ -177,10 +241,8 @@ function New-SingleExePackage {
     $modelFolderName = Get-ModelFolderName
 
     Copy-PayloadFiles -ModelFolderName $modelFolderName
-    Compress-Archive -Path (Join-Path $payloadRoot "*") -DestinationPath $payloadZip -CompressionLevel Optimal
-
     Copy-Item -Force $bootstrapperExe $artifactPath
-    Append-Payload -ArtifactPath $artifactPath -PayloadZipPath $payloadZip -ModelKey $Model
+    Append-RawBundle -ArtifactPath $artifactPath -ModelKey $Model
 
     if (-not (Test-Path $artifactPath)) {
         throw "Expected release artifact was not created: $artifactPath"

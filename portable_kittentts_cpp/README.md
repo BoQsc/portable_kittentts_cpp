@@ -58,6 +58,31 @@ List voices:
 
 `run.bat` and `run.ps1` are still kept as generic compatibility launchers, but the four model-specific `.bat` files are the simplest way to start a model directly.
 
+## Session Mode
+
+Use bare `--session` when you want a single foreground process that keeps one model loaded and reads commands from stdin:
+
+```powershell
+.\nano.bat --session --speaker Jasper
+speaker=Bella text="Hello world"
+speaker=Leo speed=0.9 text="How are you?"
+Hello from the default speaker
+exit
+```
+
+In session mode, each line can set defaults or speak immediately. Common fields are `speaker=...`, `speed=...`, `output=...`, `clean-text=...`, and `text=...`.
+
+For named reusable sessions, use `--session NAME` from your scripts:
+
+```bat
+@echo off
+kitten_tts.exe --session avatar --model nano --speaker Rosie --text "Hello world"
+kitten_tts.exe --session avatar --model nano --speaker Rosie --text "The second line reuses the same session."
+kitten_tts.exe --session avatar --terminate
+```
+
+The first call auto-launches a reusable background session if needed. Later calls with the same name reuse the already loaded model, and `--terminate` stops that named session cleanly.
+
 ## Models
 
 Nano is the default bundled model:
@@ -130,6 +155,10 @@ The GitHub release workflow publishes two kinds of artifacts on `v*` tags:
 The single-EXE releases are CLI-compatible: double-clicking opens the interactive prompt, and command-line switches such as `--text`, `--speaker`, `--speed`, `--output`, `--list-speakers`, and the rest of the portable flags are forwarded to the embedded app.
 The only model-related difference is that each bundle is fixed to its baked-in model, so the wrapper injects the matching `--model` value for you.
 Use the `dist.zip` release if you want all bundled models in one portable folder, or use a single-EXE bundle if you want one model pinned to a double-clickable file.
+The wrapper caches the extracted portable app under your user profile after the first real launch, so later runs are much faster.
+Pass `--coldstart` to force a fresh temporary extraction and feel the first-launch cost yourself.
+`--help` is handled directly by the bootstrapper and does not unpack the payload.
+Use `--session` if you want the process to stay alive and accept one command per line, which is handy for scripts or repeated utterances with different speakers.
 Push a tag like `v0.1.0` and the GitHub Actions workflow will publish these artifacts automatically.
 You can also trigger the same workflow manually from the GitHub Actions tab and enter the release tag there.
 

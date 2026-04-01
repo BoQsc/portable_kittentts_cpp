@@ -37,6 +37,7 @@ namespace kit
         static KittenTtsEngine load(const std::filesystem::path& app_root, const std::string& model_variant);
 
         void print_speakers() const;
+        std::string speakers_text() const;
         AudioResult synthesize(const std::string& text, const std::string& speaker, float speed, bool clean_text = false);
 
         const std::string& model_name() const { return _model_name; }
