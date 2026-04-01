@@ -1,33 +1,83 @@
 # portable_kittentts_cpp
 
-This repository hosts the release automation and the source project for a small portable Kitten TTS build.
+Portable Kitten TTS for Windows, written in C++.
 
-The actual C++ application lives in:
+This repository contains the source project and release automation for a small local text-to-speech build. It ships:
 
-- [portable_kittentts_cpp/](portable_kittentts_cpp/)
+- a normal portable `dist` folder
+- one-file release bundles pinned to a specific model
+- named reusable sessions for scripting
+- offline Windows inference without Python or Node in the release artifacts
 
-Useful entry points:
+For the full CLI reference, model list, and voice examples, see the project README at [portable_kittentts_cpp/README.md](portable_kittentts_cpp/README.md).
 
-- [Project README](portable_kittentts_cpp/README.md)
-- [Release workflow](.github/workflows/release.yml)
-- [Third-party notices](THIRD_PARTY_NOTICES.md)
+## Quick Start
 
-What this repo publishes:
+Download the latest GitHub Release and choose the artifact that fits your workflow:
 
-- a normal portable `dist` zip
-- per-model single-EXE release bundles for `nano`, `nano-int8`, `micro`, and `mini`
+| Artifact | Best for |
+| --- | --- |
+| `dist.zip` | One portable folder with all bundled models |
+| `nano.exe`, `nano-int8.exe`, `micro.exe`, `mini.exe` | One model in one file, with first-launch caching |
 
-The single-EXE bundles are still CLI-compatible. They cache a model-specific payload under your user profile on first launch, set up the portable app root, and forward the normal command-line switches to the embedded `kitten_tts.exe`.
-Double-clicking one opens the interactive prompt just like the portable folder build.
-The first real launch does the extraction work once, and later runs reuse the cache so startup is much faster.
-Pass `--coldstart` if you want a one-off launch that skips the cache and does a fresh temporary extraction instead.
-Pass `--session` if you want a persistent command loop that keeps the model loaded and accepts requests from stdin.
-Session lines can set `speaker`, `speed`, `output`, and `clean-text`, then speak text without restarting the process.
+From the `dist` folder, the model launchers are:
 
-The repo is structured this way so generated runtime assets, models, and release outputs stay out of source control while GitHub Actions builds and publishes them on demand.
+```powershell
+.\nano.bat
+.\nano-int8.bat
+.\micro.bat
+.\mini.bat
+```
 
-## License And Notices
+One-shot synthesis:
 
-The repository code is intended to be GPL-3.0-or-later.
-The bundled third-party components and model licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-When `LICENSE` is present at the repo root, `build.ps1` copies it into `dist/` alongside the notices file so release artifacts carry both.
+```powershell
+.\nano.bat --speaker Rosie --text "Hello world"
+```
+
+Named reusable session for scripts:
+
+```bat
+@echo off
+kitten_tts.exe --session avatar --model nano --speaker Rosie --text "Hello world"
+kitten_tts.exe --session avatar --model nano --speaker Rosie --text "The second line reuses the same session."
+kitten_tts.exe --session avatar --terminate
+```
+
+## Speakers
+
+Bundled Kitten voices:
+
+| Name | Voice |
+| --- | --- |
+| Bella | `expr-voice-2-f` |
+| Jasper | `expr-voice-2-m` |
+| Luna | `expr-voice-3-f` |
+| Bruno | `expr-voice-3-m` |
+| Rosie | `expr-voice-4-f` |
+| Hugo | `expr-voice-4-m` |
+| Kiki | `expr-voice-5-f` |
+| Leo | `expr-voice-5-m` |
+
+Aliases:
+
+- `male` maps to `Jasper`
+- `female` maps to `Bella`
+
+## What Is Here
+
+- [portable_kittentts_cpp/](portable_kittentts_cpp/) - the actual C++ app and build scripts
+- [Release workflow](.github/workflows/release.yml) - builds and publishes releases on GitHub Actions
+- [Third-party notices](THIRD_PARTY_NOTICES.md) - bundled runtime and model licenses
+
+## Notes
+
+- The portable app is CPU-only.
+- `--session` keeps one model loaded and accepts multiple commands from stdin.
+- Single-EXE bundles cache their extracted payload after the first launch.
+- `--coldstart` forces a fresh temporary extraction for the single-EXE bundles.
+- The root repo stays source-only; generated assets and release outputs are excluded from Git.
+
+## License
+
+The repository code is GPL-3.0-or-later. Third-party component and model licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
