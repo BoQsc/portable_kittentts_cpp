@@ -26,6 +26,7 @@ portable_kittentts_cpp/third_party/onnxruntime/lib/
 __pycache__/
 
 # Scratch folders from experiments
+archive/
 _hf_kitten_webgpu/
 _kitten_small_check/
 _onnxruntime1221_extract/
